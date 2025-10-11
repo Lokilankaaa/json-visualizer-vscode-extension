@@ -3,7 +3,7 @@
   "displayName": "JSON可视化工具",
   "description": "选中JSON文本后在侧边栏中格式化展示，支持高亮和层级结构",
   "version": "0.0.1",
-  "publisher": " Lokilanka",
+  "publisher": "Lokilanka",
   "engines": {
     "vscode": "^1.74.0"
   },
