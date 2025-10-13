@@ -22,22 +22,38 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // 注册可视化JSON命令
+    // 注册可视化JSON命令（智能模式：总是获取最新选中内容）
     context.subscriptions.push(
-        vscode.commands.registerCommand('json-visualizer.visualizeJson', () => {
+        vscode.commands.registerCommand('json-visualizer.visualizeJson', async () => {
+            let selectedText = '';
+            
+            // 优先尝试从编辑器获取选中文本
             const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage('没有活动的编辑器');
-                return;
+            if (editor && !editor.selection.isEmpty) {
+                selectedText = editor.document.getText(editor.selection);
+            }
+            
+            // 如果没有从编辑器获取到文本，或者为了确保获取最新选中内容，执行复制操作
+            if (!selectedText.trim()) {
+                try {
+                    // 执行复制命令获取当前选中的文本
+                    await vscode.commands.executeCommand('editor.action.clipboardCopyAction');
+                    
+                    // 等待复制完成
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    
+                    // 从剪贴板读取
+                    selectedText = await vscode.env.clipboard.readText();
+                    if (!selectedText.trim()) {
+                        vscode.window.showErrorMessage('无法获取JSON内容，请确保有选中的文本');
+                        return;
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage('无法复制内容，请先选中JSON文本');
+                    return;
+                }
             }
 
-            const selection = editor.selection;
-            if (selection.isEmpty) {
-                vscode.window.showErrorMessage('请先选中JSON文本');
-                return;
-            }
-
-            const selectedText = editor.document.getText(selection);
             try {
                 // 尝试解析JSON
                 const jsonData = JSON.parse(selectedText);

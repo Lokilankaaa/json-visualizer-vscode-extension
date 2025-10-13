@@ -2,7 +2,7 @@
   "name": "infile-json-visualizer",
   "displayName": "JSON可视化工具",
   "description": "选中JSON文本后在侧边栏中格式化展示，支持高亮和层级结构",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "Lokilanka",
   "repository": {
     "type": "git",
@@ -41,14 +41,12 @@
       "editor/context": [
         {
           "command": "json-visualizer.visualizeJson",
-          "when": "editorHasSelection",
           "group": "1_modification"
         }
       ],
       "commandPalette": [
         {
-          "command": "json-visualizer.visualizeJson",
-          "when": "editorHasSelection"
+          "command": "json-visualizer.visualizeJson"
         }
       ]
     },
