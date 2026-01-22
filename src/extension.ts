@@ -54,20 +54,11 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
 
-            try {
-                // 尝试解析JSON
-                const jsonData = JSON.parse(selectedText);
-                
-                // 打开侧边栏
-                vscode.commands.executeCommand('workbench.view.extension.jsonVisualizerContainer');
-                
-                // 更新JSON显示
-                provider.updateJSON(jsonData, selectedText);
-                
-                vscode.window.showInformationMessage('JSON已成功可视化');
-            } catch (error) {
-                vscode.window.showErrorMessage(`无效的JSON格式: ${error instanceof Error ? error.message : '未知错误'}`);
-            }
+            // 打开侧边栏
+            vscode.commands.executeCommand('workbench.view.extension.jsonVisualizerContainer');
+            
+            // 发送原始文本给WebView，由WebView处理解析和显示
+            provider.updateJSON(null, selectedText);
         })
     );
 }
