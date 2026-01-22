@@ -181,8 +181,9 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
             flex-direction: column;
             border-bottom: 1px solid var(--border-color);
             flex-shrink: 0;
-            max-height: 40vh;
-            transition: height 0.2s;
+            /* max-height: 40vh;  移除最大高度限制，允许拖动 */
+            height: auto;
+            position: relative;
         }
 
         .input-toolbar {
@@ -225,9 +226,10 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
             padding: 8px;
             font-family: inherit;
             font-size: inherit;
-            resize: vertical;
+            resize: none; /* 禁用原生 resize */
             box-sizing: border-box;
             outline: none;
+            min-height: 40px;
         }
         #jsonInput:focus {
             border: 1px solid var(--vscode-focusBorder);
@@ -239,6 +241,19 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
             padding: 4px 10px;
             background-color: rgba(255, 0, 0, 0.1);
             display: none;
+        }
+
+        .resizer {
+            height: 6px;
+            background: transparent;
+            cursor: row-resize;
+            width: 100%;
+            position: relative;
+            margin-top: -3px;
+            z-index: 10;
+        }
+        .resizer:hover {
+            background: var(--vscode-scrollbarSlider-hoverBackground);
         }
 
         /* 可视化区域 */
@@ -359,6 +374,7 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
         </div>
         <textarea id="jsonInput" placeholder="在此输入或粘贴 JSON..."></textarea>
         <div class="error-msg" id="errorMsg"></div>
+        <div class="resizer" id="dragHandle"></div>
     </div>
 
     <!-- 可视化区域 -->
@@ -396,8 +412,35 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
             btnSync: document.getElementById('btnSync'),
             jsonInput: document.getElementById('jsonInput'),
             errorMsg: document.getElementById('errorMsg'),
+            dragHandle: document.getElementById('dragHandle'),
             jsonContainer: document.getElementById('jsonContainer')
         };
+
+        // 拖动调整高度
+        let isResizing = false;
+        let lastDownY = 0;
+
+        els.dragHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            lastDownY = e.clientY;
+            document.body.style.cursor = 'row-resize';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const dy = e.clientY - lastDownY;
+            const newHeight = els.jsonInput.offsetHeight + dy;
+            if (newHeight > 40) {
+                els.jsonInput.style.height = newHeight + 'px';
+            }
+            lastDownY = e.clientY;
+        });
+
+        document.addEventListener('mouseup', () => {
+            isResizing = false;
+            document.body.style.cursor = 'default';
+        });
 
         // 初始化
         window.addEventListener('message', event => {
@@ -429,6 +472,16 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
             }
         });
 
+        els.searchInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    navigateSearch(-1);
+                } else {
+                    navigateSearch(1);
+                }
+            }
+        });
         els.btnCollapseAll.addEventListener('click', () => toggleAll(false));
         els.btnExpandAll.addEventListener('click', () => toggleAll(true));
         
@@ -519,9 +572,9 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
         // 渲染逻辑
         function render() {
             els.jsonContainer.innerHTML = '';
-            searchResults = []; // 清空搜索结果引用
             
             const searchQuery = els.searchInput.value.toLowerCase();
+            const currentTargetLineIndex = searchResults[currentSearchIndex];
             let skipUntilLevel = -1;
 
             for (let i = 0; i < globalLines.length; i++) {
@@ -576,7 +629,8 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
                     keySpan.className = 'json-key';
                     
                     if (searchQuery && line.key.toLowerCase().includes(searchQuery)) {
-                        keySpan.innerHTML = highlightText(line.key, searchQuery);
+                        const isCurrent = i === currentTargetLineIndex;
+                        keySpan.innerHTML = highlightText(line.key, searchQuery, isCurrent);
                     } else {
                         keySpan.textContent = \`"\${line.key}"\`;
                     }
@@ -610,7 +664,8 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
                     
                     const valStr = formatValue(line.value);
                     if (searchQuery && valStr.toLowerCase().includes(searchQuery)) {
-                        valSpan.innerHTML = highlightText(valStr, searchQuery);
+                        const isCurrent = i === currentTargetLineIndex;
+                        valSpan.innerHTML = highlightText(valStr, searchQuery, isCurrent);
                     } else {
                         valSpan.textContent = valStr;
                     }
@@ -624,38 +679,21 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
                 
                 els.jsonContainer.appendChild(div);
                 
-                // 收集高亮元素引用
-                if (searchQuery) {
-                    const highlights = div.querySelectorAll('.search-highlight');
-                    highlights.forEach(el => searchResults.push(el));
-                }
-                
                 if (line.isObject && !line.expanded) {
                     skipUntilLevel = line.level;
                 }
             }
             
-            // 恢复高亮状态
-            if (searchQuery && searchResults.length > 0) {
-                if (currentSearchIndex >= searchResults.length) {
-                    currentSearchIndex = 0;
-                }
-                if (currentSearchIndex === -1) {
-                    currentSearchIndex = 0;
-                }
-                updateHighlightState();
-            } else {
-                currentSearchIndex = -1;
-            }
             updateSearchCount();
         }
 
-            function highlightText(text, query) {
-                const escapedText = text.replace(/&/g, "\u0026amp;").replace(/</g, "\u0026lt;").replace(/>/g, "\u0026gt;");
-                const escapedQuery = query.replace(/[.*+?^\${}()|[\]\\]/g, '\\\\$\\u0026');
-                const regex = new RegExp(\`(\${escapedQuery})\`, 'gi');
-                return escapedText.replace(regex, '<span class="search-highlight">$1</span>');
-            }
+        function highlightText(text, query, isCurrent) {
+            const escapedText = text.replace(/&/g, "\u0026amp;").replace(/</g, "\u0026lt;").replace(/>/g, "\u0026gt;");
+            const escapedQuery = query.replace(/[.*+?^\${}()|[\]\\]/g, c => c === '\\\\' ? '\\\\\\\\' : '\\\\' + c);
+            const regex = new RegExp(\`(\${escapedQuery})\`, 'gi');
+            const className = isCurrent ? 'search-highlight current' : 'search-highlight';
+            return escapedText.replace(regex, \`<span class="\${className}">$1</span>\`);
+        }
 
         // 辅助：获取类型样式类
         function getTypeClass(val) {
@@ -763,41 +801,84 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
 
         // 搜索功能
         function performSearch() {
-            render();
+            const query = els.searchInput.value.toLowerCase();
+            searchResults = []; // 存储行索引
+            currentSearchIndex = -1;
+            
+            if (!query) {
+                render();
+                return;
+            }
+
+            // 基于数据搜索
+            for (let i = 0; i < globalLines.length; i++) {
+                const line = globalLines[i];
+                if (line.isClosing) continue;
+
+                let match = false;
+                if (line.key !== null && line.key.toLowerCase().includes(query)) {
+                    match = true;
+                }
+                if (!line.isObject) {
+                    const valStr = formatValue(line.value);
+                    if (valStr.toLowerCase().includes(query)) {
+                        match = true;
+                    }
+                }
+
+                if (match) {
+                    searchResults.push(i);
+                }
+            }
             
             if (searchResults.length > 0) {
-                currentSearchIndex = 0;
-                updateHighlightState();
-                scrollToCurrent();
+                navigateSearch(1); // 自动跳到第一个
+            } else {
+                render();
             }
         }
         
-        function updateHighlightState() {
-            const currents = els.jsonContainer.querySelectorAll('.search-highlight.current');
-            currents.forEach(el => el.classList.remove('current'));
-            
-            if (currentSearchIndex >= 0 && currentSearchIndex < searchResults.length) {
-                searchResults[currentSearchIndex].classList.add('current');
+        function expandParents(lineIndex) {
+            let currentLevel = globalLines[lineIndex].level;
+            if (currentLevel === 0) return;
+
+            for (let i = lineIndex - 1; i >= 0; i--) {
+                const line = globalLines[i];
+                if (line.level < currentLevel) {
+                    if (line.isObject && !line.expanded) {
+                        line.expanded = true;
+                    }
+                    currentLevel = line.level;
+                    if (currentLevel === 0) break;
+                }
             }
         }
         
-        function scrollToCurrent() {
-            if (currentSearchIndex >= 0 && currentSearchIndex < searchResults.length) {
-                searchResults[currentSearchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        function scrollToLine(lineIndex) {
+            const el = els.jsonContainer.querySelector(\`div[data-index="\${lineIndex}"]\`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }
 
         function navigateSearch(direction) {
             if (searchResults.length === 0) return;
             
-            currentSearchIndex += direction;
+            // 如果是第一次搜索（currentSearchIndex 为 -1），且 direction 为 1，则设为 0
+            if (currentSearchIndex === -1 && direction === 1) {
+                currentSearchIndex = 0;
+            } else {
+                currentSearchIndex += direction;
+            }
             
             if (currentSearchIndex >= searchResults.length) currentSearchIndex = 0;
             if (currentSearchIndex < 0) currentSearchIndex = searchResults.length - 1;
             
-            updateHighlightState();
-            scrollToCurrent();
-            updateSearchCount();
+            const targetLineIndex = searchResults[currentSearchIndex];
+            expandParents(targetLineIndex);
+            render();
+            // 渲染后等待 DOM 更新再滚动
+            setTimeout(() => scrollToLine(targetLineIndex), 0);
         }
 
         function updateSearchCount() {
