@@ -390,7 +390,7 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
         // 状态变量
         let globalLines = []; // 行模型
         let currentJson = null; // 当前解析后的JSON对象
-        let searchResults = []; // 搜索结果索引
+        let searchResults = []; // 搜索结果: { index: number, type: 'key' | 'value' }
         let currentSearchIndex = -1; // 当前选中的搜索结果
         let isEditing = false; // 是否正在编辑
 
@@ -574,7 +574,7 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
             els.jsonContainer.innerHTML = '';
             
             const searchQuery = els.searchInput.value.toLowerCase();
-            const currentTargetLineIndex = searchResults[currentSearchIndex];
+            const currentTarget = searchResults[currentSearchIndex];
             let skipUntilLevel = -1;
 
             for (let i = 0; i < globalLines.length; i++) {
@@ -629,8 +629,11 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
                     keySpan.className = 'json-key';
                     
                     if (searchQuery && line.key.toLowerCase().includes(searchQuery)) {
-                        const isCurrent = i === currentTargetLineIndex;
-                        keySpan.innerHTML = highlightText(line.key, searchQuery, isCurrent);
+                        let currentMatchIndex = -1;
+                        if (currentTarget && currentTarget.index === i && currentTarget.type === 'key') {
+                            currentMatchIndex = currentTarget.matchIndex;
+                        }
+                        keySpan.innerHTML = highlightText(line.key, searchQuery, currentMatchIndex);
                     } else {
                         keySpan.textContent = \`"\${line.key}"\`;
                     }
@@ -664,8 +667,11 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
                     
                     const valStr = formatValue(line.value);
                     if (searchQuery && valStr.toLowerCase().includes(searchQuery)) {
-                        const isCurrent = i === currentTargetLineIndex;
-                        valSpan.innerHTML = highlightText(valStr, searchQuery, isCurrent);
+                        let currentMatchIndex = -1;
+                        if (currentTarget && currentTarget.index === i && currentTarget.type === 'value') {
+                            currentMatchIndex = currentTarget.matchIndex;
+                        }
+                        valSpan.innerHTML = highlightText(valStr, searchQuery, currentMatchIndex);
                     } else {
                         valSpan.textContent = valStr;
                     }
@@ -687,12 +693,18 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
             updateSearchCount();
         }
 
-        function highlightText(text, query, isCurrent) {
+        function highlightText(text, query, currentMatchIndex) {
             const escapedText = text.replace(/&/g, "\u0026amp;").replace(/</g, "\u0026lt;").replace(/>/g, "\u0026gt;");
             const escapedQuery = query.replace(/[.*+?^\${}()|[\]\\]/g, c => c === '\\\\' ? '\\\\\\\\' : '\\\\' + c);
             const regex = new RegExp(\`(\${escapedQuery})\`, 'gi');
-            const className = isCurrent ? 'search-highlight current' : 'search-highlight';
-            return escapedText.replace(regex, \`<span class="\${className}">$1</span>\`);
+            
+            let matchCount = 0;
+            return escapedText.replace(regex, (match) => {
+                const isCurrent = matchCount === currentMatchIndex;
+                matchCount++;
+                const className = isCurrent ? 'search-highlight current' : 'search-highlight';
+                return \`<span class="\${className}">\${match}</span>\`;
+            });
         }
 
         // 辅助：获取类型样式类
@@ -802,7 +814,7 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
         // 搜索功能
         function performSearch() {
             const query = els.searchInput.value.toLowerCase();
-            searchResults = []; // 存储行索引
+            searchResults = [];
             currentSearchIndex = -1;
             
             if (!query) {
@@ -810,24 +822,33 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
+            // 辅助：计算匹配次数
+            const countMatches = (text, q) => {
+                if (!text) return 0;
+                const escapedQ = q.replace(/[.*+?^\${}()|[\]\\]/g, '\\\\$&');
+                const regex = new RegExp(escapedQ, 'gi');
+                const matches = text.match(regex);
+                return matches ? matches.length : 0;
+            };
+
             // 基于数据搜索
             for (let i = 0; i < globalLines.length; i++) {
                 const line = globalLines[i];
                 if (line.isClosing) continue;
 
-                let match = false;
-                if (line.key !== null && line.key.toLowerCase().includes(query)) {
-                    match = true;
-                }
-                if (!line.isObject) {
-                    const valStr = formatValue(line.value);
-                    if (valStr.toLowerCase().includes(query)) {
-                        match = true;
+                if (line.key !== null) {
+                    const count = countMatches(line.key, query);
+                    for (let k = 0; k < count; k++) {
+                        searchResults.push({ index: i, type: 'key', matchIndex: k });
                     }
                 }
-
-                if (match) {
-                    searchResults.push(i);
+                
+                if (!line.isObject) {
+                    const valStr = formatValue(line.value);
+                    const count = countMatches(valStr, query);
+                    for (let k = 0; k < count; k++) {
+                        searchResults.push({ index: i, type: 'value', matchIndex: k });
+                    }
                 }
             }
             
@@ -857,7 +878,7 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
         function scrollToLine(lineIndex) {
             const el = els.jsonContainer.querySelector(\`div[data-index="\${lineIndex}"]\`);
             if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.scrollIntoView({ behavior: 'auto', block: 'center' });
             }
         }
 
@@ -874,11 +895,13 @@ export class JSONVisualizerProvider implements vscode.WebviewViewProvider {
             if (currentSearchIndex >= searchResults.length) currentSearchIndex = 0;
             if (currentSearchIndex < 0) currentSearchIndex = searchResults.length - 1;
             
-            const targetLineIndex = searchResults[currentSearchIndex];
-            expandParents(targetLineIndex);
-            render();
-            // 渲染后等待 DOM 更新再滚动
-            setTimeout(() => scrollToLine(targetLineIndex), 0);
+            const target = searchResults[currentSearchIndex];
+            if (target) {
+                expandParents(target.index);
+                render();
+                // 渲染后等待 DOM 更新再滚动
+                setTimeout(() => scrollToLine(target.index), 50);
+            }
         }
 
         function updateSearchCount() {

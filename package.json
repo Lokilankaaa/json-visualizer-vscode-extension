@@ -1,8 +1,8 @@
 {
   "name": "infile-json-visualizer",
   "displayName": "JSON可视化工具",
-  "description": "选中JSON文本后在侧边栏中格式化展示，支持高亮和层级结构",
-  "version": "0.0.3",
+  "description": "选中JSON文本后在侧边栏中格式化展示/编辑/搜索，支持高亮和层级结构",
+  "version": "0.0.4",
   "publisher": "Lokilanka",
   "repository": {
     "type": "git",
